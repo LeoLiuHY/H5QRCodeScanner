@@ -86,6 +86,26 @@
             width: 100%;
             height: 100%;
             object-fit: cover;
+            transform: scaleX(-1); /* 镜像翻转，使画面更自然 */
+        }
+        
+        .video-placeholder {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            z-index: 5;
+        }
+        
+        .video-placeholder.hidden {
+            display: none;
         }
         
         .scan-overlay {
@@ -184,10 +204,6 @@
             transform: none;
         }
         
-        .btn i {
-            font-size: 18px;
-        }
-        
         .camera-selector {
             margin-top: 15px;
             width: 100%;
@@ -280,28 +296,30 @@
             border-radius: 8px;
             margin-top: 20px;
             font-size: 15px;
-            display: none;
         }
         
         .status.success {
             background-color: #dff0d8;
             color: #3c763d;
             border: 1px solid #d6e9c6;
-            display: block;
         }
         
         .status.error {
             background-color: #f2dede;
             color: #a94442;
             border: 1px solid #ebccd1;
-            display: block;
         }
         
         .status.info {
             background-color: #d9edf7;
             color: #31708f;
             border: 1px solid #bce8f1;
-            display: block;
+        }
+        
+        .status.warning {
+            background-color: #fcf8e3;
+            color: #8a6d3b;
+            border: 1px solid #faebcc;
         }
         
         .empty-results {
@@ -343,20 +361,25 @@
             }
         }
         
-        /* 自定义图标 */
-        .icon {
-            display: inline-block;
-            width: 24px;
-            height: 24px;
-            background-size: contain;
-            background-repeat: no-repeat;
-            vertical-align: middle;
+        .debug-info {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 12px;
+            margin-top: 15px;
+            font-size: 13px;
+            color: #6c757d;
         }
         
-        .icon-camera { background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white"><path d="M18 10.5V6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-4.5l4 4v-13l-4 4z"/></svg>'); }
-        .icon-scan { background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white"><path d="M2 6h2v12H2V6zm3 0h1v12H5V6zm2 0h3v12H7V6zm4 0h1v12h-1V6zm3 0h2v12h-2V6zm4 0h1v12h-1V6zm2 0h1v12h-1V6zm2 0h2v12h-2V6z"/></svg>'); }
-        .icon-stop { background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white"><path d="M6 6h12v12H6z"/></svg>'); }
-        .icon-clear { background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>'); }
+        .debug-info h4 {
+            margin-top: 0;
+            margin-bottom: 8px;
+            color: #495057;
+        }
+        
+        .debug-info.hidden {
+            display: none;
+        }
     </style>
 </head>
 <body>
@@ -369,7 +392,16 @@
         <div class="main-content">
             <div class="scanner-section">
                 <div class="camera-container">
-                    <video id="video" playsinline></video>
+                    <!-- 视频占位符，摄像头未启动时显示 -->
+                    <div id="videoPlaceholder" class="video-placeholder">
+                        <div style="font-size: 48px; margin-bottom: 15px;">📷</div>
+                        <h3>摄像头未启动</h3>
+                        <p style="margin-top: 10px; text-align: center; max-width: 80%;">请允许摄像头访问权限并选择一个摄像头</p>
+                    </div>
+                    
+                    <video id="video" autoplay playsinline></video>
+                    
+                    <!-- 扫描框 -->
                     <div class="scan-overlay">
                         <div class="scan-frame">
                             <div class="scan-line"></div>
@@ -378,16 +410,16 @@
                 </div>
                 
                 <div class="controls">
-                    <button id="singleScanBtn" class="btn btn-primary">
-                        <span class="icon icon-camera"></span>
+                    <button id="singleScanBtn" class="btn btn-primary" disabled>
+                        <span>📸</span>
                         单次扫码
                     </button>
-                    <button id="continuousScanBtn" class="btn btn-secondary">
-                        <span class="icon icon-scan"></span>
+                    <button id="continuousScanBtn" class="btn btn-secondary" disabled>
+                        <span>🔁</span>
                         开始连续扫码
                     </button>
                     <button id="clearBtn" class="btn btn-danger">
-                        <span class="icon icon-clear"></span>
+                        <span>🗑️</span>
                         清空结果
                     </button>
                 </div>
@@ -399,7 +431,15 @@
                 </div>
                 
                 <div id="status" class="status info">
-                    请选择摄像头并点击上方按钮开始扫描
+                    正在初始化摄像头...
+                </div>
+                
+                <!-- 调试信息区域 -->
+                <div id="debugInfo" class="debug-info hidden">
+                    <h4>调试信息</h4>
+                    <div>视频尺寸: <span id="videoSize">未知</span></div>
+                    <div>摄像头状态: <span id="cameraStatus">等待中...</span></div>
+                    <div>扫描状态: <span id="scanStatus">未启动</span></div>
                 </div>
             </div>
             
@@ -434,6 +474,8 @@
         let isContinuousMode = false;
         let scanInterval = null;
         let scanResults = [];
+        let lastScanTime = 0;
+        const SCAN_COOLDOWN = 500; // 扫描冷却时间，避免重复扫描
         
         // DOM元素
         const singleScanBtn = document.getElementById('singleScanBtn');
@@ -441,9 +483,14 @@
         const clearBtn = document.getElementById('clearBtn');
         const cameraSelect = document.getElementById('cameraSelect');
         const video = document.getElementById('video');
+        const videoPlaceholder = document.getElementById('videoPlaceholder');
         const status = document.getElementById('status');
         const resultsContainer = document.getElementById('resultsContainer');
         const resultsCount = document.getElementById('resultsCount');
+        const debugInfo = document.getElementById('debugInfo');
+        const videoSize = document.getElementById('videoSize');
+        const cameraStatus = document.getElementById('cameraStatus');
+        const scanStatus = document.getElementById('scanStatus');
         
         // 初始化
         document.addEventListener('DOMContentLoaded', function() {
@@ -469,13 +516,61 @@
                     stopCamera();
                 }
             });
+            
+            // 调试模式：按Ctrl+D显示调试信息
+            document.addEventListener('keydown', function(e) {
+                if (e.ctrlKey && e.key === 'd') {
+                    debugInfo.classList.toggle('hidden');
+                    e.preventDefault();
+                }
+            });
+            
+            // 监听视频元数据加载完成
+            video.addEventListener('loadedmetadata', function() {
+                updateVideoSize();
+                cameraStatus.textContent = '已加载';
+            });
+            
+            video.addEventListener('playing', function() {
+                cameraStatus.textContent = '播放中';
+                videoPlaceholder.classList.add('hidden');
+                showStatus('摄像头已就绪，可以开始扫描', 'success');
+            });
+            
+            video.addEventListener('pause', function() {
+                cameraStatus.textContent = '已暂停';
+            });
+            
+            video.addEventListener('error', function(e) {
+                console.error('视频错误:', e);
+                cameraStatus.textContent = '错误: ' + video.error?.message || '未知错误';
+                showStatus('视频播放错误: ' + (video.error?.message || '未知错误'), 'error');
+            });
         });
+        
+        // 更新视频尺寸显示
+        function updateVideoSize() {
+            if (videoElement.videoWidth && videoElement.videoHeight) {
+                videoSize.textContent = `${videoElement.videoWidth} × ${videoElement.videoHeight}`;
+            } else {
+                videoSize.textContent = '未知';
+            }
+        }
         
         // 枚举摄像头设备
         async function enumerateCameras() {
             try {
-                // 首先请求摄像头权限以获取设备标签
-                const tempStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                showStatus('正在获取摄像头列表...', 'info');
+                
+                // 首先检查浏览器是否支持媒体设备
+                if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+                    throw new Error('您的浏览器不支持摄像头API，请使用Chrome、Firefox或Edge等现代浏览器');
+                }
+                
+                // 请求摄像头权限
+                const tempStream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: 'environment' } 
+                });
                 tempStream.getTracks().forEach(track => track.stop());
                 
                 // 获取设备列表
@@ -484,6 +579,10 @@
                 
                 // 清空选择框
                 cameraSelect.innerHTML = '<option value="">选择摄像头...</option>';
+                
+                if (videoDevices.length === 0) {
+                    throw new Error('未检测到摄像头设备');
+                }
                 
                 // 添加摄像头选项
                 videoDevices.forEach((device, index) => {
@@ -498,9 +597,30 @@
                     cameraSelect.value = videoDevices[0].deviceId;
                     startCamera(videoDevices[0].deviceId);
                 }
+                
+                showStatus('已找到' + videoDevices.length + '个摄像头', 'success');
             } catch (error) {
-                showStatus('无法访问摄像头: ' + error.message, 'error');
                 console.error('摄像头枚举错误:', error);
+                let errorMessage = '无法访问摄像头: ';
+                
+                if (error.name === 'NotAllowedError') {
+                    errorMessage += '用户拒绝了摄像头权限请求。请刷新页面并允许摄像头访问。';
+                } else if (error.name === 'NotFoundError') {
+                    errorMessage += '未找到摄像头设备。请检查摄像头是否已连接。';
+                } else if (error.name === 'NotSupportedError') {
+                    errorMessage += '您的浏览器不支持摄像头功能。';
+                } else if (error.name === 'NotReadableError') {
+                    errorMessage += '摄像头可能正被其他应用程序占用。';
+                } else {
+                    errorMessage += error.message;
+                }
+                
+                showStatus(errorMessage, 'error');
+                cameraStatus.textContent = '错误: ' + error.name;
+                
+                // 禁用扫描按钮
+                singleScanBtn.disabled = true;
+                continuousScanBtn.disabled = true;
             }
         }
         
@@ -515,20 +635,48 @@
             stopScanning();
             
             try {
+                showStatus('正在启动摄像头...', 'info');
+                cameraStatus.textContent = '启动中...';
+                
+                // 隐藏占位符
+                videoPlaceholder.classList.remove('hidden');
+                
+                // 禁用按钮
+                singleScanBtn.disabled = true;
+                continuousScanBtn.disabled = true;
+                
                 const constraints = {
                     video: {
                         deviceId: deviceId ? { exact: deviceId } : undefined,
                         width: { ideal: 1280 },
                         height: { ideal: 720 },
-                        facingMode: { ideal: 'environment' }
+                        facingMode: { ideal: 'environment' } // 优先使用后置摄像头
                     }
                 };
                 
+                // 尝试启动摄像头
                 videoStream = await navigator.mediaDevices.getUserMedia(constraints);
-                videoElement.srcObject = videoStream;
                 currentCameraId = deviceId;
                 
-                showStatus('摄像头已启动，准备扫描', 'info');
+                // 将视频流绑定到video元素
+                videoElement.srcObject = videoStream;
+                
+                // 尝试播放视频
+                try {
+                    await videoElement.play();
+                } catch (playError) {
+                    console.warn('自动播放失败:', playError);
+                    // 显示提示，需要用户交互
+                    showStatus('请点击页面任意位置开始视频播放', 'warning');
+                    
+                    // 添加一次性点击事件来启动视频
+                    const playOnClick = () => {
+                        videoElement.play();
+                        document.removeEventListener('click', playOnClick);
+                        showStatus('摄像头已启动，可以开始扫描', 'success');
+                    };
+                    document.addEventListener('click', playOnClick);
+                }
                 
                 // 启用扫描按钮
                 singleScanBtn.disabled = false;
@@ -536,8 +684,21 @@
                 
                 return true;
             } catch (error) {
-                showStatus('无法启动摄像头: ' + error.message, 'error');
                 console.error('摄像头启动错误:', error);
+                
+                let errorMessage = '无法启动摄像头: ';
+                if (error.name === 'NotAllowedError') {
+                    errorMessage += '用户拒绝了摄像头权限请求。';
+                } else if (error.name === 'NotFoundError') {
+                    errorMessage += '未找到指定的摄像头设备。';
+                } else if (error.name === 'NotReadableError') {
+                    errorMessage += '摄像头可能正被其他应用程序占用。';
+                } else {
+                    errorMessage += error.message;
+                }
+                
+                showStatus(errorMessage, 'error');
+                cameraStatus.textContent = '错误: ' + error.name;
                 
                 // 禁用扫描按钮
                 singleScanBtn.disabled = true;
@@ -559,7 +720,11 @@
             // 停止扫描
             stopScanning();
             
+            // 显示占位符
+            videoPlaceholder.classList.remove('hidden');
+            
             showStatus('摄像头已停止', 'info');
+            cameraStatus.textContent = '已停止';
             
             // 禁用扫描按钮
             singleScanBtn.disabled = true;
@@ -573,12 +738,20 @@
                 return;
             }
             
+            // 检查冷却时间
+            const now = Date.now();
+            if (now - lastScanTime < SCAN_COOLDOWN) {
+                showStatus('请稍等再扫描', 'warning');
+                return;
+            }
+            
             // 如果正在连续扫描，先停止
             if (isContinuousMode) {
                 stopContinuousScan();
             }
             
             isScanning = true;
+            scanStatus.textContent = '扫描中...';
             showStatus('正在扫描...', 'info');
             
             // 执行单次扫描
@@ -586,11 +759,18 @@
                 if (result) {
                     addResult(result, true);
                     showStatus('扫描成功!', 'success');
+                    lastScanTime = Date.now();
                 } else {
-                    showStatus('未检测到二维码', 'error');
+                    showStatus('未检测到二维码，请确保二维码在扫描框内', 'warning');
                 }
                 
                 isScanning = false;
+                scanStatus.textContent = '已完成';
+            }).catch(error => {
+                console.error('扫描错误:', error);
+                showStatus('扫描失败: ' + error.message, 'error');
+                isScanning = false;
+                scanStatus.textContent = '错误';
             });
         }
         
@@ -612,11 +792,12 @@
             
             isContinuousMode = true;
             isScanning = true;
-            continuousScanBtn.innerHTML = '<span class="icon icon-stop"></span>停止连续扫码';
+            continuousScanBtn.innerHTML = '<span>⏹️</span>停止连续扫码';
             continuousScanBtn.classList.remove('btn-secondary');
             continuousScanBtn.classList.add('btn-danger');
             
-            showStatus('连续扫描已启动', 'info');
+            scanStatus.textContent = '连续扫描中';
+            showStatus('连续扫描已启动', 'success');
             
             // 设置扫描间隔
             scanInterval = setInterval(() => {
@@ -627,7 +808,7 @@
                         }
                     });
                 }
-            }, 1000); // 每秒扫描一次
+            }, 800); // 每800毫秒扫描一次
         }
         
         // 停止连续扫描
@@ -640,10 +821,11 @@
                 scanInterval = null;
             }
             
-            continuousScanBtn.innerHTML = '<span class="icon icon-scan"></span>开始连续扫码';
+            continuousScanBtn.innerHTML = '<span>🔁</span>开始连续扫码';
             continuousScanBtn.classList.remove('btn-danger');
             continuousScanBtn.classList.add('btn-secondary');
             
+            scanStatus.textContent = '已停止';
             showStatus('连续扫描已停止', 'info');
         }
         
@@ -659,7 +841,7 @@
         // 执行二维码扫描
         async function performScan() {
             if (!videoElement.videoWidth || !videoElement.videoHeight) {
-                return null;
+                throw new Error('视频未就绪');
             }
             
             // 设置Canvas尺寸与视频相同
@@ -674,7 +856,7 @@
             
             // 使用jsQR库识别二维码
             const code = jsQR(imageData.data, imageData.width, imageData.height, {
-                inversionAttempts: "dontInvert",
+                inversionAttempts: "attemptBoth", // 尝试识别反色二维码
             });
             
             if (code) {
@@ -769,6 +951,9 @@
                 startCamera(currentCameraId);
             }
         });
+        
+        // 每2秒更新一次视频尺寸显示
+        setInterval(updateVideoSize, 2000);
     </script>
 </body>
 </html>
