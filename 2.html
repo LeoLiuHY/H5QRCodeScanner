@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web二维码扫描器（优化屏幕码）</title>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+    <style>
+        /* 【样式部分与之前完全一致，为节省篇幅已省略】
+           请直接使用之前代码的完整<style>部分，此处仅展示关键改动 */
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Web二维码扫描器 - 屏幕码优化版</h1>
+            <p class="subtitle">已优化对手机/电脑屏幕上二维码的识别能力</p>
+        </header>
+        
+        <div class="main-content">
+            <div class="scanner-section">
+                <div class="camera-container">
+                    <div id="videoPlaceholder" class="video-placeholder">
+                        <div style="font-size: 48px; margin-bottom: 15px;">📱</div>
+                        <h3>准备扫描屏幕二维码</h3>
+                        <p>请将摄像头对准电脑或手机屏幕上的二维码</p>
+                        <p style="font-size: 0.9em; margin-top: 15px; color: #e0e0ff;">💡 提示：保持稳定，避免反光</p>
+                    </div>
+                    <video id="video" autoplay playsinline></video>
+                    <div class="scan-overlay">
+                        <div class="scan-frame">
+                            <div class="scan-line"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="controls">
+                    <button id="singleScanBtn" class="btn btn-primary" disabled>
+                        <span>📸</span>单次扫码
+                    </button>
+                    <button id="continuousScanBtn" class="btn btn-secondary" disabled>
+                        <span>🔁</span>开始连续扫码
+                    </button>
+                    <button id="snapshotBtn" class="btn btn-warning" disabled>
+                        <span>📷</span>手动抓图识别
+                    </button>
+                    <button id="clearBtn" class="btn btn-danger">
+                        <span>🗑️</span>清空结果
+                    </button>
+                </div>
+
+                <!-- 新增：屏幕码扫描技巧提示 -->
+                <div class="tips-box">
+                    <h4><span>💡</span> 扫描屏幕二维码技巧</h4>
+                    <ul>
+                        <li><strong>调整距离</strong>：摄像头离屏幕约15-30厘米，让二维码充满扫描框</li>
+                        <li><strong>避免反光</strong>：调整角度，避开灯光在屏幕上的反光点</li>
+                        <li><strong>保持稳定</strong>：手持设备时尽量保持稳定，或使用支架</li>
+                        <li><strong>调高亮度</strong>：将显示二维码的屏幕亮度调到最高</li>
+                        <li><strong>尝试「手动抓图识别」</strong>：如果自动扫描失败，使用此功能</li>
+                    </ul>
+                </div>
+                
+                <!-- 【其他部分：摄像头选择、状态显示等与之前一致，此处省略】 -->
+            </div>
+            
+            <div class="results-section">
+                <!-- 【结果展示区与之前一致，此处省略】 -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 全局变量
+        let videoStream = null;
+        let videoElement = null;
+        let canvasElement = null;
+        let canvasContext = null;
+        let isScanning = false;
+        let isContinuousMode = false;
+        let scanInterval = null;
+        let scanResults = [];
+        let lastScanTime = 0;
+        const SCAN_COOLDOWN = 700; // 扫描屏幕码需要更长的间隔
+
+        // DOM元素
+        const singleScanBtn = document.getElementById('singleScanBtn');
+        const continuousScanBtn = document.getElementById('continuousScanBtn');
+        const snapshotBtn = document.getElementById('snapshotBtn'); // 新增：手动抓图按钮
+        const clearBtn = document.getElementById('clearBtn');
+        const video = document.getElementById('video');
+        const status = document.getElementById('status');
+
+        // 初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            videoElement = video;
+            
+            // 创建Canvas
+            canvasElement = document.createElement('canvas');
+            canvasContext = canvasElement.getContext('2d');
+            
+            // 事件监听
+            singleScanBtn.addEventListener('click', startSingleScan);
+            continuousScanBtn.addEventListener('click', toggleContinuousScan);
+            snapshotBtn.addEventListener('click', captureAndDecodeSnapshot); // 新增
+            clearBtn.addEventListener('click', clearResults);
+            
+            // 初始化摄像头 - 关键改动：优先选择后置摄像头
+            initCameraForScreenScanning();
+        });
+
+        // 【函数 enumerateCameras() 和 startCamera() 与之前基本一致】
+        // 但 startCamera 的 constraints 需要调整，见下方：
+
+        async function startCamera(deviceId) {
+            // ... (停止现有摄像头等准备工作)
+            
+            try {
+                // 📱 关键优化：针对屏幕扫描的摄像头参数
+                const constraints = {
+                    video: {
+                        deviceId: deviceId ? { exact: deviceId } : undefined,
+                        // 1. 优先选择后置摄像头（扫描屏幕时通常效果更好）
+                        facingMode: { ideal: 'environment' },
+                        // 2. 不要求过高分辨率，避免处理压力
+                        width: { ideal: 1280, max: 1920 },
+                        height: { ideal: 720, max: 1080 },
+                        // 3. 明确需要自动对焦（很多手机前置摄像头是定焦的）
+                        advanced: [{ focusMode: 'continuous' }]
+                    }
+                };
+                
+                videoStream = await navigator.mediaDevices.getUserMedia(constraints);
+                videoElement.srcObject = videoStream;
+                
+                // 等待视频就绪
+                await new Promise((resolve) => {
+                    videoElement.onloadedmetadata = () => resolve();
+                });
+                
+                // 启用所有按钮
+                singleScanBtn.disabled = false;
+                continuousScanBtn.disabled = false;
+                snapshotBtn.disabled = false; // 启用手动抓图按钮
+                
+                showStatus('摄像头已就绪。请将屏幕二维码对准扫描框。', 'success');
+                return true;
+                
+            } catch (error) {
+                // ... (错误处理)
+                return false;
+            }
+        }
+
+        // 【单次扫描、连续扫描的开关函数与之前类似，但 performScan 函数是关键】
+
+        // 🎯 核心优化：执行二维码扫描（专门优化屏幕码识别）
+        async function performScan() {
+            if (!videoElement.videoWidth) {
+                throw new Error('视频未就绪');
+            }
+            
+            // 1. 设置Canvas尺寸（适当缩小可提高性能）
+            const scaleFactor = 0.8; // 缩小到80%以加快处理
+            canvasElement.width = videoElement.videoWidth * scaleFactor;
+            canvasElement.height = videoElement.videoHeight * scaleFactor;
+            
+            // 2. 绘制视频帧到Canvas
+            canvasContext.drawImage(
+                videoElement, 
+                0, 0, videoElement.videoWidth, videoElement.videoHeight,
+                0, 0, canvasElement.width, canvasElement.height
+            );
+            
+            // 3. 获取图像数据
+            const imageData = canvasContext.getImageData(0, 0, canvasElement.width, canvasElement.height);
+            
+            // 4. 🚀 关键优化：配置jsQR识别参数以更好地识别屏幕码
+            const code = jsQR(
+                imageData.data, 
+                imageData.width, 
+                imageData.height, 
+                {
+                    // 对屏幕码最重要的设置：
+                    inversionAttempts: "attemptBoth", // ✅ 必须：尝试识别反色码（深色背景浅色码）
+                    
+                    // 可选：调整识别阈值（如果默认值效果不好）
+                    // 以下参数在jsQR文档中可能需要查看最新版本支持情况
+                    // 如果扫描困难，可以尝试取消注释并调整：
+                    /*
+                    greyScaleWeights: {
+                        red: 0.299,
+                        green: 0.587,
+                        blue: 0.114
+                    },
+                    */
+                    
+                    // 可以尝试降低要求的速度以换取准确性
+                    // canOverwriteImage: false // 保持原始图像数据
+                }
+            );
+            
+            if (code) {
+                console.log("✅ 成功识别二维码:", code.data.substring(0, 50) + "...");
+                return {
+                    data: code.data,
+                    format: 'QR Code',
+                    timestamp: new Date(),
+                    source: isContinuousMode ? '连续' : '单次'
+                };
+            }
+            
+            return null;
+        }
+
+        // 📸 新增：手动抓图识别功能（针对特别困难的屏幕码）
+        async function captureAndDecodeSnapshot() {
+            if (!videoStream) {
+                showStatus('请先启动摄像头', 'error');
+                return;
+            }
+            
+            showStatus('正在捕获图像并识别...', 'info');
+            
+            // 1. 完整尺寸捕获
+            const snapshotCanvas = document.createElement('canvas');
+            const snapshotCtx = snapshotCanvas.getContext('2d');
+            
+            snapshotCanvas.width = videoElement.videoWidth;
+            snapshotCanvas.height = videoElement.videoHeight;
+            snapshotCtx.drawImage(videoElement, 0, 0);
+            
+            // 2. 尝试多种图像处理方式
+            const results = [];
+            
+            // 方式A：直接识别
+            let imageData = snapshotCtx.getImageData(0, 0, snapshotCanvas.width, snapshotCanvas.height);
+            let code = jsQR(imageData.data, imageData.width, imageData.height, {
+                inversionAttempts: "attemptBoth"
+            });
+            if (code) results.push({ method: '直接识别', data: code.data });
+            
+            // 方式B：转换为灰度并提高对比度后识别（针对低对比度屏幕码）
+            if (!code) {
+                const grayImageData = convertToHighContrastGray(imageData);
+                code = jsQR(grayImageData.data, grayImageData.width, grayImageData.height, {
+                    inversionAttempts: "attemptBoth"
+                });
+                if (code) results.push({ method: '增强对比度', data: code.data });
+            }
+            
+            // 3. 显示结果
+            if (results.length > 0) {
+                const bestResult = results[0];
+                addResult({
+                    data: bestResult.data,
+                    format: 'QR Code',
+                    timestamp: new Date(),
+                    source: '手动抓图 (' + bestResult.method + ')'
+                }, false);
+                showStatus(`手动抓图识别成功 (${bestResult.method})!`, 'success');
+                
+                // 短暂显示捕获的画面给用户确认
+                showTemporarySnapshot(snapshotCanvas);
+            } else {
+                showStatus('手动抓图也未识别到二维码。请调整位置/角度重试。', 'error');
+            }
+        }
+
+        // 辅助函数：转换为高对比度灰度图像
+        function convertToHighContrastGray(imageData) {
+            const data = imageData.data;
+            const newData = new Uint8ClampedArray(data.length);
+            
+            for (let i = 0; i < data.length; i += 4) {
+                const r = data[i];
+                const g = data[i + 1];
+                const b = data[i + 2];
+                
+                // 转换为灰度
+                const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+                
+                // 提高对比度（简单线性拉伸）
+                const contrastFactor = 1.5;
+                const contrasted = ((gray - 128) * contrastFactor) + 128;
+                
+                // 钳制到0-255范围
+                const finalValue = Math.max(0, Math.min(255, contrasted));
+                
+                newData[i] = finalValue;     // R
+                newData[i + 1] = finalValue; // G
+                newData[i + 2] = finalValue; // B
+                newData[i + 3] = 255;        // A
+            }
+            
+            return new ImageData(newData, imageData.width, imageData.height);
+        }
+
+        // 辅助函数：短暂显示捕获的画面
+        function showTemporarySnapshot(canvas) {
+            const container = document.querySelector('.camera-container');
+            const img = document.createElement('img');
+            img.src = canvas.toDataURL('image/png');
+            img.style.cssText = `
+                position: absolute; top: 0; left: 0; 
+                width: 100%; height: 100%; z-index: 20;
+                object-fit: contain; background: black;
+            `;
+            container.appendChild(img);
+            
+            setTimeout(() => {
+                if (img.parentNode) img.parentNode.removeChild(img);
+            }, 2000); // 显示2秒后消失
+        }
+
+        // 【addResult(), showStatus() 等辅助函数与之前一致】
+        
+        // 新增：针对屏幕扫描的摄像头初始化
+        async function initCameraForScreenScanning() {
+            try {
+                showStatus('正在初始化摄像头（优化屏幕码扫描）...', 'info');
+                
+                // 直接请求后置摄像头
+                const constraints = {
+                    video: {
+                        facingMode: { ideal: 'environment' }, // 后置摄像头
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
+                    }
+                };
+                
+                videoStream = await navigator.mediaDevices.getUserMedia(constraints);
+                videoElement.srcObject = videoStream;
+                
+                showStatus('摄像头已启动。请将手机/电脑屏幕上的二维码对准扫描框。', 'success');
+                
+                // 启用按钮
+                singleScanBtn.disabled = false;
+                continuousScanBtn.disabled = false;
+                snapshotBtn.disabled = false;
+                
+            } catch (error) {
+                showStatus('摄像头初始化失败: ' + error.message, 'error');
+                console.error('初始化失败:', error);
+            }
+        }
+    </script>
+
+    <style>
+        /* 新增：技巧提示框样式 */
+        .tips-box {
+            background: linear-gradient(135deg, #f5f7ff 0%, #eef1ff 100%);
+            border-left: 4px solid #4b6cb7;
+            border-radius: 8px;
+            padding: 15px;
+            margin-top: 20px;
+            font-size: 14px;
+        }
+        
+        .tips-box h4 {
+            margin-top: 0;
+            margin-bottom: 10px;
+            color: #182848;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .tips-box ul {
+            margin: 0;
+            padding-left: 20px;
+            color: #555;
+        }
+        
+        .tips-box li {
+            margin-bottom: 8px;
+            line-height: 1.4;
+        }
+        
+        .btn-warning {
+            background-color: #f0ad4e;
+            color: white;
+        }
+        
+        .btn-warning:hover {
+            background-color: #ec971f;
+            transform: translateY(-2px);
+        }
+        
+        /* 响应式调整 */
+        @media (max-width: 768px) {
+            .controls {
+                flex-direction: column;
+            }
+            
+            .btn {
+                min-width: 100%;
+                margin-bottom: 10px;
+            }
+            
+            .tips-box {
+                font-size: 13px;
+                padding: 12px;
+            }
+        }
+    </style>
+</body>
+</html>
